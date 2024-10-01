@@ -13,14 +13,16 @@ import SwiftUI
 import UIKit
 
 struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
-    
     @Binding var mode: Mode
+    @Binding var selectedClass: String?
 
     // This method creates and returns an instance of your ViewController
     func makeUIViewController(context: Context) -> ViewController {
         let viewController = ViewController()
         viewController.isVideoMode = mode == .video
         viewController.isCameraRollMode = mode == .cameraRoll
+        viewController.isCaptureMode = mode == .CaptureMode
+        viewController.selectedClass = selectedClass
         return viewController
     }
 
@@ -28,6 +30,8 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ViewController, context: Context) {
         uiViewController.isVideoMode = mode == .video
         uiViewController.isCameraRollMode = mode == .cameraRoll
+        uiViewController.isCaptureMode = mode == .CaptureMode
+        uiViewController.selectedClass = selectedClass
         uiViewController.updateCaptureButton() // Update button whenever the mode changes
     }
 }
@@ -36,15 +40,19 @@ enum Mode: String, CaseIterable {
     case photo = "Photo Mode"
     case video = "Video Mode"
     case cameraRoll = "Camera Roll Mode"
+    case CaptureMode = "Capture Mode"
 }
 
 struct ContentView: View {
     @State private var isShowingSettings = false
     @State private var selectedMode: Mode = .photo
+    @State private var classes: [String] = []
+    @State private var selectedClass: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
-            CameraViewControllerRepresentable(mode: $selectedMode)
+            CameraViewControllerRepresentable(mode: $selectedMode, selectedClass: $selectedClass)
                 .edgesIgnoringSafeArea(.all)
             
             VStack {
@@ -61,13 +69,80 @@ struct ContentView: View {
                 }
                 Spacer()
             }
+            // If in CaptureMode, overlay the picker
+            if selectedMode == .CaptureMode {
+                VStack {
+                    if let errorMessage = errorMessage {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .padding()
+                    } else {
+                         Picker("Select Class", selection: $selectedClass) {
+                            ForEach(classes, id: \.self) { className in
+                                Text(className)
+                            }
+                        }
+                        .pickerStyle(WheelPickerStyle())
+                        .labelsHidden()
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(10)
+                        .position(x: UIScreen.main.bounds.width / 2 - 10, y: UIScreen.main.bounds.height - 220)
+                        .padding()
+                    }
+                    Spacer()
+                }
+            }
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(selectedMode: $selectedMode)
         }
+        .onChange(of: selectedMode) {
+            if selectedMode == .CaptureMode {
+                    fetchClasses()
+                }
+        }
+    }
+
+    func fetchClasses() {
+        let serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
+        guard let url = URL(string: serverURL + "/classes") else {
+            self.errorMessage = "Invalid server URL."
+            return
+        }
+
+        let request = URLRequest(url: url)
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Error fetching classes: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "No data received."
+                }
+                return
+            }
+
+            do {
+                let classes = try JSONDecoder().decode([String].self, from: data)
+                DispatchQueue.main.async {
+                    self.classes = classes
+                    if !classes.isEmpty {
+                        self.selectedClass = classes[0]
+                    }
+                    self.errorMessage = nil
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Error parsing classes: \(error.localizedDescription)"
+                }
+            }
+        }.resume()
     }
 }
-
 
 struct SettingsView: View {
     @Binding var selectedMode: Mode
@@ -116,7 +191,6 @@ struct SettingsView: View {
     }
 }
 
-
 class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
 
     var captureButton: UIButton!
@@ -133,8 +207,10 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
     var lastPrediction: String = "capture a frame to continue"
     var isVideoMode: Bool = false
     var isCameraRollMode: Bool = false
+    var isCaptureMode: Bool = false
     var isAwaitingServerResponse: Bool = false
     var isUsingFrontCamera: Bool = false // Track whether the front or rear camera is active
+    var selectedClass: String?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -278,9 +354,12 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             openPhotoPicker()
         } else {
             // Ensure the capture session is running
-            if !captureSession.isRunning {
-                captureSession.startRunning()
+            DispatchQueue.global(qos: .background).async {
+                if !self.captureSession.isRunning {
+                    self.captureSession.startRunning()
+                } // Restart the session with the new input
             }
+           
 
             // Capture photo in photo mode
             let settings = AVCapturePhotoSettings()
@@ -351,42 +430,55 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
     }
 
     func updateCaptureButton() {
-                if isVideoMode {
-                    dismissImageView()
-                    captureButton.isHidden = true // Hide button in video mode
-                    flipCameraButton.isHidden = false
-                    captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
-                    if !captureSession.isRunning {
-                        DispatchQueue.global(qos: .background).async {
-                            self.captureSession.startRunning()
-                        }                           }
-                    showCameraPreview() // Ensure preview is shown
-                } else if isCameraRollMode {
-                    dismissImageView()
-                    captureButton.isHidden = false
-                    flipCameraButton.isHidden = true
-                    captureButton.frame = CGRect(x: 20, y: 60, width: 150, height: 30)
-                    captureButton.setTitleColor(.white, for: .normal)
-
-                    captureButton.setTitle("Select Photo", for: .normal) // Show "Select Photo" in camera roll mode
-                    showCameraRollImage() // Show the image and black background in Camera Roll Mode
-                } else {
-                    dismissImageView()
-                    captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
-                    resultLabel.isHidden = true
-
-                    captureButton.isHidden = false
-                    flipCameraButton.isHidden = false
-
-                    captureButton.setTitle("Capture", for: .normal) // Default to "Capture" in photo mode
-                    if !captureSession.isRunning {
-                        DispatchQueue.global(qos: .background).async {
-                            self.captureSession.startRunning()
-                        }                            }
-                    showCameraPreview() // Show the camera preview in Photo Mode
+        if isVideoMode {
+            dismissImageView()
+            captureButton.isHidden = true // Hide button in video mode
+            flipCameraButton.isHidden = false
+            captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
+            if !captureSession.isRunning {
+                DispatchQueue.global(qos: .background).async {
+                    self.captureSession.startRunning()
                 }
             }
-    
+            showCameraPreview() // Ensure preview is shown
+        } else if isCameraRollMode {
+            dismissImageView()
+            captureButton.isHidden = false
+            flipCameraButton.isHidden = true
+            captureButton.frame = CGRect(x: 20, y: 60, width: 150, height: 30)
+            captureButton.setTitleColor(.white, for: .normal)
+
+            captureButton.setTitle("Select Photo", for: .normal) // Show "Select Photo" in camera roll mode
+            showCameraRollImage() // Show the image and black background in Camera Roll Mode
+        } else if isCaptureMode {
+            dismissImageView()
+            captureButton.isHidden = false
+            flipCameraButton.isHidden = false
+            captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
+            captureButton.setTitle("Capture", for: .normal)
+            if !captureSession.isRunning {
+                DispatchQueue.global(qos: .background).async {
+                    self.captureSession.startRunning()
+                }
+            }
+            showCameraPreview()
+        } else {
+            dismissImageView()
+            captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
+            resultLabel.isHidden = true
+
+            captureButton.isHidden = false
+            flipCameraButton.isHidden = false
+
+            captureButton.setTitle("Capture", for: .normal) // Default to "Capture" in photo mode
+            if !captureSession.isRunning {
+                DispatchQueue.global(qos: .background).async {
+                    self.captureSession.startRunning()
+                }
+            }
+            showCameraPreview() // Show the camera preview in Photo Mode
+        }
+    }
 
     func showCameraRollImage() {
         // Stop the camera preview
@@ -406,7 +498,6 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             self.view.bringSubviewToFront(self.imageView)
             self.view.bringSubviewToFront(self.resultLabel)
             self.view.bringSubviewToFront(self.captureButton)
-
         }
     }
 
@@ -425,13 +516,11 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             }
         }
     }
-    
-
 
     func sendImageToServer(imageData: Data) {
         let serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
-            
-        guard let url = URL(string: serverURL) else { return }
+        let endpoint = isCaptureMode ? "/upload" : "/predict"
+        guard let url = URL(string: serverURL + endpoint) else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -440,37 +529,90 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
+        // Add image data
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
 
-        request.httpBody = body
-
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else {
-                print("Error uploading image: \(String(describing: error))")
+        if isCaptureMode {
+            // Add class_name
+            guard let selectedClass = selectedClass else {
+                DispatchQueue.main.async {
+                    self.resultLabel.text = "No class selected."
+                    self.resultLabel.isHidden = false
+                }
                 return
             }
 
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                do {
-                    let result = try JSONDecoder().decode(PredictionResponse.self, from: data)
-                    let lastPredictedClass = result.predicted_class
+        // Add class_name as a form field
+           
+                body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                body.append("Content-Disposition: form-data; name=\"class_name\"\r\n\r\n".data(using: .utf8)!)
+                body.append("\(selectedClass)\r\n".data(using: .utf8)!)
+            
 
-                    DispatchQueue.main.async {
-                        self.resultLabel.text = "Predicted Class: \(lastPredictedClass)"
-                        self.resultLabel.isHidden = false // Make sure the label is shown
+//            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+
+        }
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+        print(body)
+
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async {
+                    self.resultLabel.text = "Error uploading image: \(error?.localizedDescription ?? "Unknown error")"
+                    self.resultLabel.isHidden = false
+                }
+                return
+            }
+
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    if self.isCaptureMode {
+                        DispatchQueue.main.async {
+                            self.resultLabel.text = "Image uploaded successfully."
+                            self.resultLabel.isHidden = false
+                        }
+                        self.isAwaitingServerResponse = false
+                    } else {
+                        do {
+                            let result = try JSONDecoder().decode(PredictionResponse.self, from: data)
+                            let lastPredictedClass = result.predicted_class
+
+                            DispatchQueue.main.async {
+                                self.resultLabel.text = "Predicted Class: \(lastPredictedClass)"
+                                self.resultLabel.isHidden = false // Make sure the label is shown
+                            }
+                            self.isAwaitingServerResponse = false
+                        } catch {
+                            DispatchQueue.main.async {
+                                self.resultLabel.text = "Error decoding response."
+                                self.resultLabel.isHidden = false
+                            }
+                            self.isAwaitingServerResponse = false
+                        }
                     }
-
-                    self.isAwaitingServerResponse = false
-                } catch {
-                    print("Error decoding JSON: \(error)")
+                } else {
+                    // Handle non-200 response
+                    DispatchQueue.main.async {
+                        let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown server error."
+                        self.resultLabel.text = "Server error: \(errorMsg)"
+                        print("Server error: \(errorMsg)")
+                        self.resultLabel.isHidden = false
+                    }
                     self.isAwaitingServerResponse = false
                 }
             } else {
-                print("Error: Server returned an invalid response.")
+                DispatchQueue.main.async {
+                    self.resultLabel.text = "Invalid server response."
+                    self.resultLabel.isHidden = false
+                }
                 self.isAwaitingServerResponse = false
             }
         }
@@ -482,8 +624,6 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         let predicted_class: String
     }
 }
-
-
 
 extension UIImage {
     static func blackImage(of size: CGSize) -> UIImage? {
