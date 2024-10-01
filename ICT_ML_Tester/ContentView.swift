@@ -561,8 +561,6 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
         request.httpBody = body
-        print(body)
-
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else {
                 DispatchQueue.main.async {
