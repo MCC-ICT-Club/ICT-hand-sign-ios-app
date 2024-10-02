@@ -14,7 +14,9 @@ import UIKit
 
 struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     @Binding var mode: Mode
-    @Binding var selectedClass: String?
+    @Binding var selectedClass: String
+    @Binding var forceUpdate: Bool
+
 
     // This method creates and returns an instance of your ViewController
     func makeUIViewController(context: Context) -> ViewController {
@@ -33,6 +35,8 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
         uiViewController.isCaptureMode = mode == .CaptureMode
         uiViewController.selectedClass = selectedClass
         uiViewController.updateCaptureButton() // Update button whenever the mode changes
+        print("Selected class: \(String(describing: selectedClass))") // Debugging line
+
     }
 }
 
@@ -47,12 +51,14 @@ struct ContentView: View {
     @State private var isShowingSettings = false
     @State private var selectedMode: Mode = .photo
     @State private var classes: [String] = []
-    @State private var selectedClass: String?
+    @State public var selectedClass: String = ""
     @State private var errorMessage: String?
+    @State private var forceUpdate: Bool = false
+
 
     var body: some View {
         ZStack {
-            CameraViewControllerRepresentable(mode: $selectedMode, selectedClass: $selectedClass)
+            CameraViewControllerRepresentable(mode: $selectedMode, selectedClass: $selectedClass, forceUpdate: $forceUpdate)
                 .edgesIgnoringSafeArea(.all)
             
             VStack {
@@ -86,7 +92,7 @@ struct ContentView: View {
                         .labelsHidden()
                         .background(Color.black.opacity(0.7))
                         .cornerRadius(10)
-                        .position(x: UIScreen.main.bounds.width / 2 - 10, y: UIScreen.main.bounds.height - 220)
+                        .position(x: UIScreen.main.bounds.width / 2 - 16, y: UIScreen.main.bounds.height - 230)
                         .padding()
                     }
                     Spacer()
@@ -101,6 +107,7 @@ struct ContentView: View {
                     fetchClasses()
                 }
         }
+
     }
 
     func fetchClasses() {
@@ -545,6 +552,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
                 }
                 return
             }
+            print("selected class: \(selectedClass)")
 
         // Add class_name as a form field
            
