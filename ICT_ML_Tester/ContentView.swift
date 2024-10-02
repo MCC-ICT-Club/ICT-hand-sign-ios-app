@@ -188,6 +188,14 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
     }
 
     func setupUI() {
+        
+        let borderView = UIView(frame: CGRect(x: (view.frame.width - 640) / 2, y: (view.frame.height - 480) / 2, width: 640, height: 480))
+            borderView.layer.borderWidth = 4.0
+            borderView.layer.borderColor = UIColor.black.cgColor // Change to any color
+            borderView.backgroundColor = UIColor.clear // Ensure the inside is transparent
+
+            view.addSubview(borderView)
+        
         // Image view to display captured photo or camera roll image
         imageView = UIImageView(frame: view.bounds)
         imageView.contentMode = .scaleAspectFit
