@@ -14,29 +14,20 @@ import UIKit
 
 struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     @Binding var mode: Mode
-    @Binding var selectedClass: String
-    @Binding var forceUpdate: Bool
-
-
-    // This method creates and returns an instance of your ViewController
+    
     func makeUIViewController(context: Context) -> ViewController {
         let viewController = ViewController()
         viewController.isVideoMode = mode == .video
         viewController.isCameraRollMode = mode == .cameraRoll
         viewController.isCaptureMode = mode == .CaptureMode
-        viewController.selectedClass = selectedClass
         return viewController
     }
 
-    // This method updates the UIViewController as needed
     func updateUIViewController(_ uiViewController: ViewController, context: Context) {
         uiViewController.isVideoMode = mode == .video
         uiViewController.isCameraRollMode = mode == .cameraRoll
         uiViewController.isCaptureMode = mode == .CaptureMode
-        uiViewController.selectedClass = selectedClass
-        uiViewController.updateCaptureButton() // Update button whenever the mode changes
-        print("Selected class: \(String(describing: selectedClass))") // Debugging line
-
+        uiViewController.updateCaptureButton() // Update UI when mode changes
     }
 }
 
@@ -50,15 +41,10 @@ enum Mode: String, CaseIterable {
 struct ContentView: View {
     @State private var isShowingSettings = false
     @State private var selectedMode: Mode = .photo
-    @State private var classes: [String] = []
-    @State public var selectedClass: String = ""
-    @State private var errorMessage: String?
-    @State private var forceUpdate: Bool = false
-
 
     var body: some View {
         ZStack {
-            CameraViewControllerRepresentable(mode: $selectedMode, selectedClass: $selectedClass, forceUpdate: $forceUpdate)
+            CameraViewControllerRepresentable(mode: $selectedMode)
                 .edgesIgnoringSafeArea(.all)
             
             VStack {
@@ -75,79 +61,10 @@ struct ContentView: View {
                 }
                 Spacer()
             }
-            // If in CaptureMode, overlay the picker
-            if selectedMode == .CaptureMode {
-                VStack {
-                    if let errorMessage = errorMessage {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .padding()
-                    } else {
-                         Picker("Select Class", selection: $selectedClass) {
-                            ForEach(classes, id: \.self) { className in
-                                Text(className)
-                            }
-                        }
-                        .pickerStyle(WheelPickerStyle())
-                        .labelsHidden()
-                        .background(Color.black.opacity(0.7))
-                        .cornerRadius(10)
-                        .position(x: UIScreen.main.bounds.width / 2 - 16, y: UIScreen.main.bounds.height - 230)
-                        .padding()
-                    }
-                    Spacer()
-                }
-            }
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(selectedMode: $selectedMode)
         }
-        .onChange(of: selectedMode) {
-            if selectedMode == .CaptureMode {
-                    fetchClasses()
-                }
-        }
-
-    }
-
-    func fetchClasses() {
-        let serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
-        guard let url = URL(string: serverURL + "/classes") else {
-            self.errorMessage = "Invalid server URL."
-            return
-        }
-
-        let request = URLRequest(url: url)
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Error fetching classes: \(error.localizedDescription)"
-                }
-                return
-            }
-
-            guard let data = data else {
-                DispatchQueue.main.async {
-                    self.errorMessage = "No data received."
-                }
-                return
-            }
-
-            do {
-                let classes = try JSONDecoder().decode([String].self, from: data)
-                DispatchQueue.main.async {
-                    self.classes = classes
-                    if !classes.isEmpty {
-                        self.selectedClass = classes[0]
-                    }
-                    self.errorMessage = nil
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Error parsing classes: \(error.localizedDescription)"
-                }
-            }
-        }.resume()
     }
 }
 
@@ -198,7 +115,7 @@ struct SettingsView: View {
     }
 }
 
-class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIPickerViewDataSource, UIPickerViewDelegate {
 
     var captureButton: UIButton!
     var resultLabel: UILabel!
@@ -217,7 +134,12 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
     var isCaptureMode: Bool = false
     var isAwaitingServerResponse: Bool = false
     var isUsingFrontCamera: Bool = false // Track whether the front or rear camera is active
+
+    var classes: [String] = []
     var selectedClass: String?
+    var errorMessage: String?
+
+    var classPickerView: UIPickerView!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -310,6 +232,16 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         resultLabel.layer.masksToBounds = true
         resultLabel.isHidden = true // Initially hidden
         view.addSubview(resultLabel)
+
+        // Initialize classPickerView
+        classPickerView = UIPickerView()
+        classPickerView.dataSource = self
+        classPickerView.delegate = self
+        classPickerView.frame = CGRect(x: 20, y: view.frame.height - 230, width: view.frame.width - 40, height: 200)
+        classPickerView.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        classPickerView.layer.cornerRadius = 10
+        classPickerView.isHidden = true // Initially hidden
+        view.addSubview(classPickerView)
     }
 
     @objc func dismissImageView() {
@@ -320,6 +252,8 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         imageView.isHidden = true
         resultLabel.isHidden = true
         tapToDismissOverlayView.isHidden = true
+        classPickerView.isHidden = false // Initially hidden
+
 
         // Only resume the camera preview if not in Camera Roll Mode
         if !isCameraRollMode {
@@ -366,7 +300,6 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
                     self.captureSession.startRunning()
                 } // Restart the session with the new input
             }
-           
 
             // Capture photo in photo mode
             let settings = AVCapturePhotoSettings()
@@ -384,6 +317,8 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             imageView.isHidden = false
             resultLabel.isHidden = false
             tapToDismissOverlayView.isHidden = false
+            classPickerView.isHidden = true // Initially hidden
+
 
             // Hide the camera preview until the screen is tapped
             hideCameraPreview()
@@ -397,6 +332,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         view.bringSubviewToFront(imageView)
         view.bringSubviewToFront(resultLabel)
         view.bringSubviewToFront(tapToDismissOverlayView)
+        view.bringSubviewToFront(classPickerView)
     }
 
     func showCameraPreview() {
@@ -441,7 +377,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             dismissImageView()
             captureButton.isHidden = true // Hide button in video mode
             flipCameraButton.isHidden = false
-            captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
+            classPickerView.isHidden = true
             if !captureSession.isRunning {
                 DispatchQueue.global(qos: .background).async {
                     self.captureSession.startRunning()
@@ -452,15 +388,16 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             dismissImageView()
             captureButton.isHidden = false
             flipCameraButton.isHidden = true
+            classPickerView.isHidden = true
             captureButton.frame = CGRect(x: 20, y: 60, width: 150, height: 30)
             captureButton.setTitleColor(.white, for: .normal)
-
             captureButton.setTitle("Select Photo", for: .normal) // Show "Select Photo" in camera roll mode
             showCameraRollImage() // Show the image and black background in Camera Roll Mode
         } else if isCaptureMode {
             dismissImageView()
             captureButton.isHidden = false
             flipCameraButton.isHidden = false
+            classPickerView.isHidden = false
             captureButton.frame = CGRect(x: 20, y: 95, width: 150, height: 30)
             captureButton.setTitle("Capture", for: .normal)
             if !captureSession.isRunning {
@@ -468,6 +405,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
                     self.captureSession.startRunning()
                 }
             }
+            fetchClasses() // Fetch classes when entering Capture Mode
             showCameraPreview()
         } else {
             dismissImageView()
@@ -476,6 +414,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
 
             captureButton.isHidden = false
             flipCameraButton.isHidden = false
+            classPickerView.isHidden = true
 
             captureButton.setTitle("Capture", for: .normal) // Default to "Capture" in photo mode
             if !captureSession.isRunning {
@@ -554,16 +493,10 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             }
             print("selected class: \(selectedClass)")
 
-        // Add class_name as a form field
-           
-                body.append("--\(boundary)\r\n".data(using: .utf8)!)
-                body.append("Content-Disposition: form-data; name=\"class_name\"\r\n\r\n".data(using: .utf8)!)
-                body.append("\(selectedClass)\r\n".data(using: .utf8)!)
-            
-
-//            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-
-
+            // Add class_name as a form field
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"class_name\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(selectedClass)\r\n".data(using: .utf8)!)
         }
 
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
@@ -628,6 +561,84 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
 
     struct PredictionResponse: Codable {
         let predicted_class: String
+    }
+
+    // MARK: - Fetch Classes
+
+    func fetchClasses() {
+        let serverURL = UserDefaults.standard.string(forKey: "serverURL") ?? ""
+        guard let url = URL(string: serverURL + "/classes") else {
+            self.errorMessage = "Invalid server URL."
+            self.showAlert(title: "Error", message: self.errorMessage!)
+            return
+        }
+
+        let request = URLRequest(url: url)
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Error fetching classes: \(error.localizedDescription)"
+                    self.showAlert(title: "Error", message: self.errorMessage!)
+                }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    self.errorMessage = "No data received."
+                    self.showAlert(title: "Error", message: self.errorMessage!)
+                }
+                return
+            }
+
+            do {
+                let classes = try JSONDecoder().decode([String].self, from: data)
+                DispatchQueue.main.async {
+                    self.classes = classes
+                    self.classPickerView.reloadAllComponents()
+                    if !classes.isEmpty {
+                        self.selectedClass = classes[0]
+                        self.classPickerView.selectRow(0, inComponent: 0, animated: false)
+                    }
+                    self.errorMessage = nil
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Error parsing classes: \(error.localizedDescription)"
+                    self.showAlert(title: "Error", message: self.errorMessage!)
+                }
+            }
+        }.resume()
+    }
+
+    // MARK: - UIPickerViewDataSource
+
+    func numberOfComponents(in pickerView: UIPickerView) -> Int {
+        return 1 // Single column picker
+    }
+
+    func pickerView(_ pickerView: UIPickerView, numberOfRowsInComponent component: Int) -> Int {
+        return classes.count
+    }
+
+    // MARK: - UIPickerViewDelegate
+
+    func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? {
+        return classes[row]
+    }
+
+    func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
+        selectedClass = classes[row]
+    }
+
+    // MARK: - Error Handling
+
+    func showAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+            alertController.addAction(UIAlertAction(title: "OK", style: .default))
+            self.present(alertController, animated: true)
+        }
     }
 }
 
