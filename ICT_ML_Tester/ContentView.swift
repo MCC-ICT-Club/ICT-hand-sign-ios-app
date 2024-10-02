@@ -252,8 +252,10 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         imageView.isHidden = true
         resultLabel.isHidden = true
         tapToDismissOverlayView.isHidden = true
-        classPickerView.isHidden = false // Initially hidden
-
+        resultLabel.text = "Waiting for Response"
+        if isCaptureMode{
+            classPickerView.isHidden = false // Initially hidden
+        }
 
         // Only resume the camera preview if not in Camera Roll Mode
         if !isCameraRollMode {
@@ -363,7 +365,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
             imageView.isHidden = false
             resultLabel.isHidden = false // Hide the label until prediction
             tapToDismissOverlayView.isHidden = false
-            if let imgData = image.jpegData(compressionQuality: 0.8){
+            if let imgData = image.pngData(){
                 sendImageToServer(imageData: imgData)
             }
             // Ensure the camera preview is stopped
@@ -455,7 +457,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
 
             if let cgImage = context.createCGImage(ciImage, from: ciImage.extent) {
                 let uiImage = UIImage(cgImage: cgImage)
-                if let imageData = uiImage.jpegData(compressionQuality: 0.8) {
+                if let imageData = uiImage.pngData(){
                     isAwaitingServerResponse = true
                     sendImageToServer(imageData: imageData)
                 }
@@ -477,8 +479,8 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         var body = Data()
         // Add image data
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.png\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
         body.append("\r\n".data(using: .utf8)!)
 
@@ -491,7 +493,6 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
                 }
                 return
             }
-            print("selected class: \(selectedClass)")
 
             // Add class_name as a form field
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
