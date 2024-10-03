@@ -56,6 +56,12 @@ struct ContentView: View {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 30))
                             .foregroundColor(.white)
+                            .background(
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundColor(.black)
+                                        .scaleEffect(1.3) // Slightly larger for the border effect
+                                        )
                             .padding()
                     }
                 }
