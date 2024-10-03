@@ -245,7 +245,7 @@ class ViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCapture
         classPickerView = UIPickerView()
         classPickerView.dataSource = self
         classPickerView.delegate = self
-        classPickerView.frame = CGRect(x: 20, y: view.frame.height - 230, width: view.frame.width - 40, height: 200)
+        classPickerView.frame = CGRect(x: 20, y: view.frame.height - 200, width: view.frame.width - 40, height: 130)
         classPickerView.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         classPickerView.layer.cornerRadius = 10
         classPickerView.isHidden = true // Initially hidden
